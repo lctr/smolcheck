@@ -1,11 +1,26 @@
+/// For greater efficiency, identifiers (outside of the scope of this toy
+/// crate) should be interned, as it would mean passing around "interner
+/// keys", which should be more lightweight assuming the interner key
+/// (denoted `Sym` here) has a smaller size than a `String` or a string
+/// slice. The `Sym` type, while a simple type alias here, should
+/// ultimately be a `newtype` for string interner keys.
+///
+/// For a simple string interner, we may assume that static string slices
+/// are stored and retrieved via a key -- in this case, since this toy
+/// crate doesn't include an actual string interner, the mere skeleton is
+/// included for completeness' sake.
+// replace with interner key in presence of (string/identifier) interner.
 pub type Sym = u32;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Name {
-    Ident(Sym),
-    Const(Sym),
+    /// To be used for interned lowercase identifiers
+    Lower(Sym),
+    /// To be used for interned uppercase identifiers
+    Upper(Sym),
     /// Uniquely generated variables
     Fresh(Var),
+    /// Catch-all to be used for displaying names
     Named(&'static str),
 }
 
@@ -44,9 +59,13 @@ impl std::fmt::Display for Var {
 }
 
 impl Name {
+    /// For variants holding keys for interned strings. Since by
+    /// convention, the `Sym` type would be used as keys to lookup
+    /// interned names, this would allow extraction of the key held
+    /// for further identifier/name lookup.
     pub fn get_sym(&self) -> Option<Sym> {
         match self {
-            Name::Ident(n) | Name::Const(n) | Name::Fresh(Var(n)) => Some(*n),
+            Name::Lower(n) | Name::Upper(n) | Name::Fresh(Var(n)) => Some(*n),
             Name::Named(_) => None,
         }
     }
