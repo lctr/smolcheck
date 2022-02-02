@@ -1,5 +1,6 @@
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Lit {
+    Unit,
     Bool,
     Int,
     Char,
@@ -8,6 +9,7 @@ pub enum Lit {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Literal {
+    Unit,
     Bool(bool),
     Int(i32),
     Char(char),
@@ -16,6 +18,10 @@ pub enum Literal {
 
 impl std::fmt::Display for Lit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", &self)
+        if matches!(self, Self::Unit) {
+            write!(f, "()")
+        } else {
+            write!(f, "{:?}", &self)
+        }
     }
 }
