@@ -14,11 +14,27 @@ pub struct Envr {
     pub store: HashMap<Name, Scheme>,
 }
 
+/// Typing environment, represents a type scope. Essentially a wrapper for
+/// a hashmap, this holds type names as keys, with their type schemes as values.
 impl Envr {
     pub fn new() -> Envr {
         Envr {
             store: HashMap::default(),
         }
+    }
+
+    pub fn with_capacity(cap: usize) -> Envr {
+        Envr {
+            store: HashMap::with_capacity(cap),
+        }
+    }
+
+    pub fn with_entries(entries: Vec<(Name, Scheme)>) -> Envr {
+        let mut envr = Self::with_capacity(entries.len());
+        for (k, v) in entries {
+            envr.insert(k, v);
+        }
+        envr
     }
 
     pub fn singleton(name: Name, scheme: Scheme) -> Envr {
@@ -134,9 +150,7 @@ impl Envr {
 }
 
 impl Substitutable for Envr {
-    type Id = Var;
-
-    fn ftv(&self) -> HashSet<Self::Id> {
+    fn ftv(&self) -> HashSet<Var> {
         self.values().cloned().collect::<Vec<_>>().ftv()
     }
 
