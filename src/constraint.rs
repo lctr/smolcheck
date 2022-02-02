@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    name::Var,
+    name::Ty,
     subst::{Subst, Substitutable},
     types::Type,
 };
@@ -30,7 +30,7 @@ impl std::fmt::Display for Constraint {
 }
 
 impl Substitutable for Constraint {
-    fn ftv(&self) -> HashSet<Var> {
+    fn ftv(&self) -> HashSet<Ty> {
         let fvs1 = self.0.ftv();
         let fvs2 = &self.1.ftv();
         fvs1.union(fvs2).cloned().collect()
