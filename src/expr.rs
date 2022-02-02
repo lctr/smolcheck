@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use crate::{
     envr::Envr,
     infer::{Constraint, Infer, Solve, Unifier},
@@ -9,11 +11,14 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expression<T> {
-    Lit(Literal),
     Ident(T),
-    Bin(PrimOp, Box<Expression<T>>, Box<Expression<T>>),
+    Lit(Literal),
+    List(Vec<Expression<T>>),
+    Tuple(Vec<Expression<T>>),
     Lam(T, Box<Expression<T>>),
     App(Box<Expression<T>>, Box<Expression<T>>),
+    Let(T, Box<Expression<T>>, Box<Expression<T>>),
+    Bin(PrimOp, Box<Expression<T>>, Box<Expression<T>>),
     Cond(Box<Expression<T>>, Box<Expression<T>>, Box<Expression<T>>),
 }
 
@@ -47,6 +52,21 @@ impl PrimOp {
             | PrimOp::Greater
             | PrimOp::LessEq
             | PrimOp::GreaterEq => Type::BOOL,
+        }
+    }
+
+    pub fn signature(self, engine: &mut Infer) -> Type {
+        use PrimOp::*;
+        match self {
+            Add | Sub | Mul => Type::Lam(
+                Type::INT.boxed(),
+                Type::Lam(Type::INT.boxed(), Type::INT.boxed()).boxed(),
+            ),
+            NotEq | Eq | Less | Greater | LessEq | GreaterEq => {
+                let a = engine.fresh();
+                let b = engine.fresh();
+                Type::Lam(a.boxed(), Type::Lam(b.boxed(), Type::BOOL.boxed()).boxed())
+            }
         }
     }
 

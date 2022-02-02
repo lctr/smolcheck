@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{name::Var, types::Type, Hashy};
 
 pub trait Substitutable {
-    type Id: Hashy;
-    fn ftv(&self) -> HashSet<Self::Id>;
+    fn ftv(&self) -> HashSet<Var>;
 
     fn apply(&self, sub: &Subst) -> Self;
 
@@ -15,18 +14,17 @@ pub trait Substitutable {
         *self = self.apply(subst);
         self
     }
+}
 
-    fn occurs_check(&self, id: &Self::Id) -> bool {
-        self.ftv().contains(id)
-    }
+pub fn occurs_check(s: &impl Substitutable, var: Var) -> bool {
+    s.ftv().contains(&var)
 }
 
 impl<T> Substitutable for Vec<T>
 where
     T: Substitutable,
 {
-    type Id = T::Id;
-    fn ftv(&self) -> HashSet<Self::Id> {
+    fn ftv(&self) -> HashSet<Var> {
         let mut base = HashSet::new();
         for t in self {
             base.extend(t.ftv());
@@ -84,12 +82,23 @@ impl<const N: usize> From<[(Var, Type); N]> for Subst {
 
 impl std::fmt::Display for Subst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.0.is_empty() {
-            writeln!(f, "Subst {{}}")?;
-        } else {
-            writeln!(f, "Subst | ")?;
-            for (v, t) in &self.0 {
-                writeln!(f, "      | {} : {}", v, t)?;
+        writeln!(f, "{{")?;
+        match self.0.len() {
+            0 => {
+                writeln!(f, "}}")?;
+            }
+            1 => {
+                let (v, t) = self.0.iter().fold(None, |a, c| Some(c)).unwrap();
+                write!(f, " {} :-> {} ", v, t)?;
+            }
+            n => {
+                let mut w = self.0.clone().into_iter().collect::<Vec<_>>();
+                w.sort_by_key(|(v, _)| *v);
+
+                for (v, t) in w {
+                    writeln!(f, "      {} :-> {}", v, t)?;
+                }
+                writeln!(f, "}}")?;
             }
         }
         Ok(())
