@@ -4,9 +4,10 @@ use std::collections::{
 };
 
 use crate::{
-    name::{Name, Sym, Var},
+    name::{Name, Sym, Ty},
     subst::{self, Subst, Substitutable},
-    types::Scheme,
+    types::{Scheme, Type},
+    Hashy,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -41,6 +42,20 @@ impl Envr {
         Envr {
             store: HashMap::from([(name, scheme)]),
         }
+    }
+
+    /// Returns a type scheme S such that
+    ///
+    /// ```txt
+    /// S = ftv(T) - ftv(E)
+    ///   = forall { s in S } . T
+    /// ```
+    ///
+    /// for the environment E
+    pub fn generalize(&self, tipo: Type) -> Scheme {
+        let poly = tipo.ftv().difference(&self.ftv()).cloned().collect();
+        let tipo = tipo.clone();
+        Scheme { poly, tipo }
     }
 
     pub fn contains_key(&self, k: &Name) -> bool {
@@ -150,7 +165,7 @@ impl Envr {
 }
 
 impl Substitutable for Envr {
-    fn ftv(&self) -> HashSet<Var> {
+    fn ftv(&self) -> HashSet<Ty> {
         self.values().cloned().collect::<Vec<_>>().ftv()
     }
 
