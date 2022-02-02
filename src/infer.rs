@@ -379,7 +379,7 @@ impl Unifier {
         // }
     }
 
-    pub fn solver(self) -> Solve<Subst> {
+    fn solver(self) -> Solve<Subst> {
         let Unifier {
             mut sub,
             mut constraints,
@@ -413,14 +413,6 @@ impl Unifier {
         }
 
         Ok(sub)
-        // constraints
-        //     .into_iter()
-        //     .fold(Ok((sub, vec![])), |a, c| {
-        //         let sub = a?;
-        //         let Constraint(t1, t2) = c;
-        //         let s1 = Self::unifies(t1, t2)?;
-        //         let s2 = s1.compose(&sub);
-        //     })
     }
 
     pub fn unifies(t1: Type, t2: Type) -> Solve<Subst> {
