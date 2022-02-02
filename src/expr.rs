@@ -1,12 +1,15 @@
 use std::borrow::Borrow;
 
 use crate::{
+    constraint::Constraint,
     envr::Envr,
-    infer::{Constraint, Infer, Solve, Unifier},
+    failure::Solve,
+    infer::Infer,
     literal::{Lit, Literal},
     name::Name,
     subst::{Subst, Substitutable},
     types::{Scheme, Type},
+    unify::Unifier,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

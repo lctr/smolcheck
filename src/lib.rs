@@ -1,10 +1,13 @@
+mod constraint;
 mod envr;
 mod expr;
+mod failure;
 mod infer;
 mod literal;
 mod name;
 mod subst;
 mod types;
+mod unify;
 
 pub trait Hashy: Clone + Eq + std::hash::Hash {}
 

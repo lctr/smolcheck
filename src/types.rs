@@ -1,13 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Write,
-};
+use std::{collections::HashSet, fmt::Write};
 
 use crate::{
     envr::Envr,
-    infer::{Failure, Solve},
+    failure::{Failure, Solve},
     literal::{Lit, Literal},
-    name::{display_fresh, Name, Sym, Var},
+    name::{Name, Var},
     subst::{Subst, Substitutable},
 };
 
