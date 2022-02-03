@@ -28,7 +28,7 @@ impl Unifier {
         Unifier::new(sub, constraints.to_vec()).solver()
     }
 
-    fn solver(self) -> Solve<Subst> {
+    pub fn solver(self) -> Solve<Subst> {
         let Unifier {
             mut sub,
             mut constraints,
