@@ -5,15 +5,25 @@ use crate::{
     envr::Envr,
     expr::{Decl, Declaration, Expr, Expression},
     failure::{Failure, Solve},
-    name::{Name, Sym, Var},
+    name::{Fresh, Name, SymId, Ty},
     subst::{Subst, Substitutable},
     types::{Scheme, Type},
     unify::Unifier,
 };
 
+use crate::types::constants::*;
+
+impl Fresh for Infer {
+    type Repr = Type;
+
+    fn fresh(&mut self) -> Self::Repr {
+        Self::fresh(self)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Infer {
-    pub count: Sym,
+    pub count: SymId,
     pub envr: Envr,
 }
 
@@ -28,9 +38,9 @@ impl Infer {
     }
 
     pub fn fresh(&mut self) -> Type {
-        let count = self.count.clone();
+        let count = self.count;
         self.count += 1;
-        Type::Var(Var(count))
+        Type::Var(Ty(count))
     }
 
     pub fn instantiate(&mut self, scheme: &Scheme) -> Solve<Type> {
@@ -45,7 +55,7 @@ impl Infer {
     }
 
     pub fn generalize(envr: &Envr, ty: Type) -> Scheme {
-        let t_ftv = ty.clone().ftv();
+        let t_ftv = ty.ftv();
         let e_ftv = envr.ftv();
         let poly = t_ftv.difference(&e_ftv).copied().collect();
         Scheme { poly, tipo: ty }
@@ -66,18 +76,18 @@ impl Infer {
         Self::generalize(&envr, ty).normalize()
     }
 
-    pub fn infer_top(&mut self, decls: &[Decl]) -> Solve<&mut Self> {
-        match decls.split_first() {
-            Some((Declaration(name, expr), rest)) => {
-                let sch = self.infer_expr(expr)?;
+    pub fn infer_bindings(&mut self, items: &[(Name, Expr)]) -> Solve<&mut Self> {
+        match items {
+            [] => Ok(self),
+            [(name, expr), rest @ ..] => {
+                let sch = self.infer_expr_scheme(expr)?;
                 self.envr.insert(*name, sch);
-                self.infer_top(rest)
+                self.infer_bindings(rest)
             }
-            None => Ok(self),
         }
     }
 
-    pub fn infer_expr(&mut self, expr: &Expr) -> Solve<Scheme> {
+    pub fn infer_expr_scheme(&mut self, expr: &Expr) -> Solve<Scheme> {
         let (ty, cs) = self.infer(expr)?;
         let sub = Unifier::solve(Subst::empty(), cs.as_slice())?;
         Self::canonicalize(ty.apply(&sub))
@@ -127,48 +137,81 @@ impl Infer {
                     // empty list has type `[a]` for some type `a`
                     [] => {
                         let tv = self.fresh();
-                        let ty = Type::List(tv.clone().boxed());
-                        // let tv2 = self.fresh();
-                        Ok((Type::List(ty.clone().boxed()), vec![(ty, tv).into()]))
+                        let tv2 = self.fresh();
+                        Ok((Type::List(tv.box_cloned()), vec![(tv2, tv).into()]))
                     }
                     [x] => {
                         let tv = self.fresh();
-                        let (t, c) = self.infer(x)?;
-                        let u1 = Type::List(tv.clone().boxed());
+                        let (c, sub, t, sc) = self.constraints_expr(x)?;
+                        let u1 = Type::List(tv.boxed());
                         let u2 = Type::List(t.clone().boxed());
-                        let cs = c.into_iter().chain([(t, u1).into()]).collect();
+                        let cs = c
+                            .into_iter()
+                            .chain([(Type::List(t.boxed()), u1).into()])
+                            .collect();
                         Ok((u2, cs))
                     }
                     xs => {
-                        let tv = self.fresh();
-                        let c0s: Vec<Constraint> = vec![];
-                        let (ty, cs) = xs
-                            .into_iter()
-                            .map(|x| {
-                                let tvi = self.fresh();
-                                let (ty, mut cs) = self.infer(x)?;
-                                cs.push(Constraint(ty.clone(), tvi.clone()));
-                                cs.push(Constraint(tvi.clone(), tv.clone()));
-                                Ok((ty, cs))
-                            })
-                            .fold(Ok((tv.clone(), c0s)), |a, c| {
-                                let (at, mut acs) = a?;
-                                let (ct, cts) = c?;
-                                acs.extend(cts);
-                                acs.push(Constraint(ct.clone(), at));
-                                Ok((ct, acs))
+                        let (c, sub, t, sc) = self.constraints_expr(&Expr::List(vec![]))?;
+                        let _t = t.clone();
+
+                        let (cs, subst, ty, _scheme) =
+                            xs.iter().fold(Ok((c, sub, t, sc)), |a, x| {
+                                let (acs, asub, at, _asch) = a?;
+                                if acs.iter().any(|Constraint(t1, t2)| match (t1, t2) {
+                                    (Type::Lit(l1), Type::Lit(l2)) => l1 != l2,
+                                    _ => false,
+                                }) {
+                                    let (l, r) = vec![Constraint(_t.clone(), at)]
+                                        .into_iter()
+                                        .chain(acs)
+                                        .fold(
+                                            (vec![], vec![]),
+                                            |(mut al, mut ar), Constraint(cx, cy)| {
+                                                al.push(cx);
+                                                ar.push(cy);
+                                                (al, ar)
+                                            },
+                                        );
+                                    return Err(Failure::Mismatch(l, r));
+                                };
+
+                                let (c1, s1, t1, sch) = self.constraints_expr(x)?;
+                                let s2 = s1.compose(&asub);
+                                let tipo = self.instantiate(&sch.normalize()?)?.apply(&s2);
+
+                                if at.ftv().is_empty() && tipo.ftv().is_empty() {
+                                    if at == tipo {
+                                        let sch = at.generalize(&self.envr);
+                                        return Ok((c1, s2, tipo, sch));
+                                    } else {
+                                        return Err(Failure::NotUnified(at, tipo));
+                                    }
+                                };
+
+                                let cs = vec![
+                                    acs,
+                                    c1,
+                                    vec![Constraint(t1, at.clone()), Constraint(at, tipo.clone())],
+                                ]
+                                .into_iter()
+                                .flatten()
+                                .collect();
+                                let sch = sch.apply(&s2);
+                                Ok((cs, s2, tipo, sch))
                             })?;
-                        Ok((Type::List(ty.boxed()), cs))
+
+                        Ok((Type::List(ty.apply(&subst).boxed()), cs))
                     }
                 }
             }
             Expression::Tuple(xs) => {
                 if xs.is_empty() {
-                    Ok((Type::UNIT, vec![]))
+                    Ok((UNIT, vec![]))
                 } else {
                     let init = (vec![], vec![]);
                     let (ts, cs) = xs
-                        .into_iter()
+                        .iter()
                         .map(|x| {
                             let tv = self.fresh();
                             let (ty, mut cs) = self.infer(x)?;
@@ -187,14 +230,10 @@ impl Infer {
             }
             Expression::Lam(x, e) => {
                 let tv = self.fresh();
-                // self.envr.remove(x);
-                let scheme = Scheme {
-                    poly: vec![],
-                    tipo: tv.clone(),
-                };
-                self.envr.insert(*x, scheme);
+
+                self.envr.insert(*x, Scheme::monotype(tv.clone()));
                 let (t, c) = self.infer(e.as_ref())?;
-                Ok((Type::Lam(Box::new(tv), Box::new(t)), c))
+                Ok((Type::Lam(tv.boxed(), t.boxed()), c))
             }
             Expression::App(x, y) => {
                 let (t1, c1) = self.infer(x.as_ref())?;
@@ -229,15 +268,10 @@ impl Infer {
                 let (t1, c1) = self.infer(cond.as_ref())?;
                 let (t2, c2) = self.infer(then.as_ref())?;
                 let (t3, c3) = self.infer(other.as_ref())?;
-                let cs = vec![
-                    c1,
-                    c2,
-                    c3,
-                    vec![(t1, Type::BOOL).into(), (t2.clone(), t3).into()],
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
+                let cs = vec![c1, c2, c3, vec![(t1, BOOL).into(), (t2.clone(), t3).into()]]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>();
                 Ok((t2, cs))
             }
         }
@@ -265,9 +299,18 @@ fn t_run_show(source: &str, expr: &Expr) {
             println!("  substitution: {}", &sub);
             println!("  type:\n\t{}", &ty);
             println!("  scheme:\n\t{}", &scheme);
+            let solved = Unifier::solve(sub, &cs);
+            match solved {
+                Ok(soln) => {
+                    println!("solution sub: {}", &soln);
+                    println!("sub applied: {}", ty.apply(&soln))
+                }
+                Err(e) => println!("{}", e),
+            }
         }
         Err(e) => println!("{}", e),
     };
+    println!("Type Environment: {:#?}", &engine.envr)
 }
 
 #[cfg(test)]
@@ -277,17 +320,31 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_list() {
-        fn lit_list(xs: &[Literal]) -> Expr {
-            Expr::List(xs.iter().map(|x| Expr::Lit(x.clone())).collect::<Vec<_>>())
-        }
+    fn inspect_nil() {
+        let nil = Expr::List(vec![]);
+        let nilsrc = "[]";
+        t_run_show(nilsrc, &nil);
+    }
 
+    fn lit_list(xs: &[Literal]) -> Expr {
+        Expr::List(xs.iter().map(|x| Expr::Lit(x.clone())).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn test_reject_bad_list() {
         let bad_list = &[Literal::Int(1), Literal::Char('s')];
         let bad_list_source = "[1, 's']";
         let bad_list = lit_list(bad_list);
         t_run_show(bad_list_source, &bad_list);
+        assert_eq!(
+            Infer::new().infer(&bad_list),
+            Err(Failure::NotUnified(INT, CHAR))
+        );
+    }
 
-        let list1 = Expr::List((1..10).map(|n| Expr::Lit(Literal::Int(5))).collect());
+    #[test]
+    fn test_list() {
+        let list1 = Expr::List((1..10).map(|n| Expr::Lit(Literal::Int(n))).collect());
         let src1 = "[1, 2, 3, 4, 5, 6, 7, 8, 9]";
         t_run_show(src1, &list1);
 
@@ -318,31 +375,8 @@ mod test {
             )),
         );
 
-        let mut checker = Infer::new();
-
-        println!("source: `\\x -> x + 5`\nlambda: {:#?}", &lam);
-        match checker.infer(&lam) {
-            Ok(res) => {
-                println!(".infer() results");
-                println!("  type:\n\t{}", &res.0);
-                println!("  constraints:");
-                Constraint::ppr_slice(res.1.as_slice())
-            }
-            Err(e) => println!("{}", e),
-        };
-        match checker.constraints_expr(&lam) {
-            Ok(res) => {
-                println!(".constraints_expr() results");
-                let (cs, sub, ty, scheme) = res;
-                println!("  constraints:");
-                Constraint::ppr_slice(cs.as_slice());
-                println!("  substitution: {}", &sub);
-                println!("  type:\n\t{}", &ty);
-                println!("  scheme:\n\t{}", &scheme);
-                println!("  substitution applied to type:\n\t{}", ty.apply(&sub));
-            }
-            Err(e) => println!("{}", e),
-        };
+        let src = "`\\x -> x + 5`";
+        t_run_show(src, &lam);
     }
 
     #[test]
@@ -372,19 +406,11 @@ mod test {
 
     #[test]
     fn test_unify_zip_vs_many() {
-        use Type as Ty;
-
         fn mk_tuple(seed: usize, lim: usize, bases: &[Type]) -> Type {
-            let _base = &[
-                Ty::BOOL,
-                Ty::Var(Var(0)),
-                Ty::CHAR,
-                Ty::UNIT,
-                Ty::List(Ty::INT.boxed()),
-            ][..];
+            let _base = &[BOOL, Type::Var(Ty(0)), CHAR, UNIT, Type::List(INT.boxed())][..];
             let bases = if bases.is_empty() { _base } else { bases };
             let len = bases.len();
-            Ty::Tuple(
+            Type::Tuple(
                 // bases.chain(bases.iter().rev())
                 bases
                     .iter()
@@ -395,7 +421,7 @@ mod test {
                     .enumerate()
                     .map(|(i, (t1, t2))| {
                         if let Some(d) = lim.checked_rem_euclid(len) {
-                            Ty::Lam(
+                            Type::Lam(
                                 t1.clone().boxed(),
                                 bases[((d + i) % len).min(i)].clone().boxed(),
                             )
@@ -412,14 +438,12 @@ mod test {
         }
 
         let lim = 9;
-        let tup0 = Ty::Tuple((0..lim as u32).map(|i| Ty::Var(Var(i))).collect());
+        let tup0 = Type::Tuple((0..lim as u32).map(|i| Type::Var(Ty(i))).collect());
         let tup1 = mk_tuple(3, lim, &[]);
         let tup2 = mk_tuple(
             3,
             lim,
-            &[Ty::List(
-                Ty::Tuple(vec![Ty::CHAR, Ty::INT, Ty::INT]).boxed(),
-            )],
+            &[Type::List(Type::Tuple(vec![CHAR, INT, INT]).boxed())],
         );
         println!("tup0 :: {}", &tup0);
         println!("tup1 :: {}", &tup1);
