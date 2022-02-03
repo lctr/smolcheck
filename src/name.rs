@@ -1,8 +1,16 @@
+use std::borrow::Cow;
+
+use lexicon::{Lexicon, Sym};
+
+use crate::Hashy;
+
+extern crate lexicon;
+
 /// For greater efficiency, identifiers (outside of the scope of this toy
 /// crate) should be interned, as it would mean passing around "interner
 /// keys", which should be more lightweight assuming the interner key
-/// (denoted `Sym` here) has a smaller size than a `String` or a string
-/// slice. The `Sym` type, while a simple type alias here, should
+/// (denoted `SymId` here) has a smaller size than a `String` or a string
+/// slice. The `SymId` type, while a simple type alias here, should
 /// ultimately be a `newtype` for string interner keys.
 ///
 /// For a simple string interner, we may assume that static string slices
@@ -10,32 +18,58 @@
 /// crate doesn't include an actual string interner, the mere skeleton is
 /// included for completeness' sake.
 // replace with interner key in presence of (string/identifier) interner.
-pub type Sym = u32;
+pub type SymId = u32;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Name {
     /// To be used for interned lowercase identifiers
-    Lower(Sym),
+    Lower(SymId),
     /// To be used for interned uppercase identifiers
-    Upper(Sym),
+    Upper(SymId),
     /// Uniquely generated variables
-    Fresh(Var),
+    Fresh(Ty),
     /// Catch-all to be used for displaying names
     Named(&'static str),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Var(pub Sym);
+impl Name {
+    pub fn display<'store>(&self, lexicon: &'store Lexicon) -> Cow<'store, str> {
+        match self {
+            Name::Lower(s) | Name::Upper(s) => (&lexicon[Sym::new(*s)]).into(),
+            Name::Fresh(ty) => ty.display().into(),
+            Name::Named(s) => Cow::from(*s),
+        }
+    }
 
-impl Var {
-    pub fn fresh(state: Sym) -> Self {
-        Var(state + 1)
+    /// For variants holding keys for interned strings. Since by
+    /// convention, the `Sym` type would be used as keys to lookup
+    /// interned names, this would allow extraction of the key held
+    /// for further identifier/name lookup.
+    pub fn get_sym(&self) -> Option<Sym> {
+        match self {
+            Name::Lower(s) | Name::Upper(s) => Some(Sym::new(*s)),
+            _ => None,
+        }
+    }
+}
+
+pub trait Fresh {
+    /// Representative
+    type Repr: Hashy;
+    fn fresh(&mut self) -> Self::Repr;
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Ty(pub SymId);
+
+impl Ty {
+    pub fn fresh(state: SymId) -> Self {
+        Ty(state + 1)
     }
 
     pub fn display(&self) -> String {
-        let index = self.0 as usize;
         let mut name = String::new();
-        let mut tmp = index.clone();
+        let mut tmp = self.0 as usize;
         let azs = ('a'..='z').collect::<Vec<char>>();
         let mut ct = 0;
         loop {
@@ -52,22 +86,9 @@ impl Var {
     }
 }
 
-impl std::fmt::Display for Var {
+impl std::fmt::Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display())
-    }
-}
-
-impl Name {
-    /// For variants holding keys for interned strings. Since by
-    /// convention, the `Sym` type would be used as keys to lookup
-    /// interned names, this would allow extraction of the key held
-    /// for further identifier/name lookup.
-    pub fn get_sym(&self) -> Option<Sym> {
-        match self {
-            Name::Lower(n) | Name::Upper(n) | Name::Fresh(Var(n)) => Some(*n),
-            Name::Named(_) => None,
-        }
     }
 }
 
@@ -76,15 +97,17 @@ impl std::fmt::Display for Name {
         if let Name::Named(s) = self {
             write!(f, "{}", s)
         } else {
+            // will only display u32 for `Upper` and `Lower` variants -- use
+            // `display` method wih interner if possible.
             write!(f, "{:?}", self)
         }
     }
 }
 
-pub fn display_fresh(s: Sym) -> String {
+pub fn display_fresh(s: SymId) -> String {
     let index = s as usize;
     let mut name = String::new();
-    let mut tmp = index.clone();
+    let mut tmp = index;
     let azs = ('a'..='z').collect::<Vec<char>>();
     let mut ct = 0;
     loop {
