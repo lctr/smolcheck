@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{name::Var, types::Type, Hashy};
+use crate::{name::Ty, types::Type};
 
 pub trait Substitutable {
-    fn ftv(&self) -> HashSet<Var>;
+    fn ftv(&self) -> HashSet<Ty>;
 
     fn apply(&self, sub: &Subst) -> Self;
 
@@ -16,7 +16,7 @@ pub trait Substitutable {
     }
 }
 
-pub fn occurs_check(s: &impl Substitutable, var: Var) -> bool {
+pub fn occurs_check(s: &impl Substitutable, var: Ty) -> bool {
     s.ftv().contains(&var)
 }
 
@@ -24,7 +24,7 @@ impl<T> Substitutable for Vec<T>
 where
     T: Substitutable,
 {
-    fn ftv(&self) -> HashSet<Var> {
+    fn ftv(&self) -> HashSet<Ty> {
         let mut base = HashSet::new();
         for t in self {
             base.extend(t.ftv());
@@ -37,10 +37,10 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct Subst(pub HashMap<Var, Type>);
+pub struct Subst(pub HashMap<Ty, Type>);
 
 impl Subst {
-    pub fn singleton(var: Var, ty: Type) -> Subst {
+    pub fn singleton(var: Ty, ty: Type) -> Subst {
         Subst(HashMap::from([(var, ty)]))
     }
 
@@ -48,7 +48,7 @@ impl Subst {
         Self::default()
     }
 
-    pub fn get(&self, name: &Var) -> Option<&Type> {
+    pub fn get(&self, name: &Ty) -> Option<&Type> {
         self.0.get(name)
     }
 
@@ -74,60 +74,62 @@ impl Subst {
 //     }
 // }
 
-impl<const N: usize> From<[(Var, Type); N]> for Subst {
-    fn from(entries: [(Var, Type); N]) -> Self {
+impl<const N: usize> From<[(Ty, Type); N]> for Subst {
+    fn from(entries: [(Ty, Type); N]) -> Self {
         Subst(entries.iter().cloned().collect::<HashMap<_, _>>())
     }
 }
 
 impl std::fmt::Display for Subst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{{")?;
+        write!(f, "{{")?;
+        let mut br = "";
         match self.0.len() {
-            0 => {
-                writeln!(f, "}}")?;
-            }
-            1 => {
-                let (v, t) = self.0.iter().fold(None, |a, c| Some(c)).unwrap();
-                write!(f, " {} :-> {} ", v, t)?;
-            }
+            0 => {}
             n => {
-                let mut w = self.0.clone().into_iter().collect::<Vec<_>>();
+                let mut w = self.0.iter().collect::<Vec<_>>();
                 w.sort_by_key(|(v, _)| *v);
-
-                for (v, t) in w {
-                    writeln!(f, "      {} :-> {}", v, t)?;
+                let i = if n == 1 {
+                    let (v, t) = w[0];
+                    write!(f, " [{} := {}] ", v, t)?;
+                    1
+                } else {
+                    br = "\n";
+                    0
+                };
+                for (v, t) in &w[i..] {
+                    write!(f, "{} [{} := {}] ", br, v, t)?;
                 }
-                writeln!(f, "}}")?;
             }
         }
-        Ok(())
+        write!(f, "{}}}", br)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{envr::Envr, literal::Lit, name::Var, types::Type};
+    use crate::{
+        envr::Envr,
+        literal::Lit,
+        name::Ty,
+        types::{Type, STR},
+    };
 
     use super::*;
 
     #[test]
-    fn test_composition() {
-        let ty1 = Type::Lam(Box::new(Type::Var(Var(3))), Box::new(Type::Var(Var(4))));
-        let sub1 = Subst::from([
-            (
-                Var(0),
-                Type::Lam(Box::new(Type::Lit(Lit::Str)), Box::new(Type::Lit(Lit::Str))),
-            ),
-            // (
-            //     Var(2),
-            //     Type::Lam(Box::new(Type::Var(Var(3))), Box::new(Type::Var(Var(4)))),
-            // ),
-        ]);
+    fn inspect_composition() {
+        fn var(n: u32) -> Type {
+            Type::Var(Ty(n))
+        }
+
+        let ty1 = Type::Lam(Type::Var(Ty(3)).boxed(), STR.boxed());
+
+        let sub1 = Subst::from([(Ty(0), Type::Lam(STR.boxed(), var(4).boxed()))]);
 
         let sub2 = Subst::from([(
-            Var(2),
-            Type::Lam(Box::new(Type::Var(Var(3))), Box::new(Type::Var(Var(4)))),
+            Ty(2),
+            Type::Lam(Box::new(Type::Var(Ty(3))), Box::new(Type::Var(Ty(4)))),
         )]);
 
         println!("sub1: {}", &sub1);
@@ -140,5 +142,8 @@ mod test {
 
         println!("comp1: {}", &comp1);
         println!("comp2: {}", &comp2);
+
+        let tvcomp12 = ty1.apply(&comp1.compose(&comp2));
+        println!("comp1 |> comp2: {}", tvcomp12);
     }
 }
