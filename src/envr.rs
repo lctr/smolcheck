@@ -4,10 +4,9 @@ use std::collections::{
 };
 
 use crate::{
-    name::{Name, Sym, Ty},
-    subst::{self, Subst, Substitutable},
+    name::{Name, Ty},
+    subst::{Subst, Substitutable},
     types::{Scheme, Type},
-    Hashy,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -54,7 +53,6 @@ impl Envr {
     /// for the environment E
     pub fn generalize(&self, tipo: Type) -> Scheme {
         let poly = tipo.ftv().difference(&self.ftv()).cloned().collect();
-        let tipo = tipo.clone();
         Scheme { poly, tipo }
     }
 
@@ -120,7 +118,7 @@ impl Envr {
         envs.iter().fold(self.clone(), |a, c| a.merge(c))
     }
 
-    pub fn keys<'a>(&'a self) -> Keys<'a, Name, Scheme> {
+    pub fn keys(&self) -> Keys<'_, Name, Scheme> {
         self.store.keys()
     }
 
@@ -203,9 +201,9 @@ where
     }
 }
 
-impl Into<Vec<(Name, Scheme)>> for Envr {
-    fn into(self) -> Vec<(Name, Scheme)> {
-        self.store.into_iter().collect()
+impl From<Envr> for Vec<(Name, Scheme)> {
+    fn from(envr: Envr) -> Self {
+        envr.into_iter().collect()
     }
 }
 
