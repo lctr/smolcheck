@@ -1,22 +1,69 @@
-use std::{collections::HashSet, fmt::Write};
+use std::{
+    collections::HashSet,
+    fmt::Write,
+    ops::{Add, AddAssign, Neg, Sub},
+};
 
 use crate::{
     envr::Envr,
     failure::{Failure, Solve},
+    infer::Infer,
     literal::{Lit, Literal},
-    name::{Name, Var},
+    name::{Name, Ty},
+    pretty::Many,
     subst::{Subst, Substitutable},
+    Hashy,
 };
+
+#[allow(unused)]
+pub struct Counter<N> {
+    count: N,
+}
+
+#[allow(unused)]
+impl<N> Counter<N>
+where
+    N: Copy + Hashy + Add<Output = N> + AddAssign + Sub<Output = N> + Neg<Output = N> + From<u32>,
+{
+    pub const MAX: u32 = u32::MAX;
+
+    pub fn increment(&mut self) -> N {
+        let n = self.count;
+        self.count += (1u32).into();
+        n
+    }
+
+    pub fn available(&self) -> N {
+        -self.count + Self::MAX.into()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Lit(Lit),
-    Var(Var),
+    Var(Ty),
     Con(Name),
     Lam(Box<Type>, Box<Type>),
     List(Box<Type>),
     Tuple(Vec<Type>),
 }
+
+pub mod constants {
+    #![allow(unused)]
+    use crate::literal::Lit;
+
+    use super::Type;
+
+    pub const UNIT: Type = Type::Lit(Lit::Unit);
+    pub const BOOL: Type = Type::Lit(Lit::Bool);
+    pub const INT: Type = Type::Lit(Lit::Int);
+    pub const CHAR: Type = Type::Lit(Lit::Char);
+    pub const STR: Type = Type::Lit(Lit::Str);
+    pub const DOUBLE: Type = Type::Lit(Lit::Double);
+    pub const FLOAT: Type = Type::Lit(Lit::Float);
+}
+
+pub use constants::*;
 
 impl Type {
     pub const UNIT: Type = Type::Lit(Lit::Unit);
@@ -33,22 +80,27 @@ impl Type {
         Box::new(self.clone())
     }
 
-    pub fn generalize(self, env: &Envr) -> Scheme {
+    pub fn instantiate(&self, engine: &mut Infer) -> Solve<Type> {
+        let scheme = self.generalize(&engine.envr);
+        engine.instantiate(&scheme)
+    }
+
+    pub fn generalize(&self, env: &Envr) -> Scheme {
         let tipo = self.clone();
         let poly = self
             .ftv()
             .difference(&env.ftv())
-            .map(|tv| *tv)
+            .copied()
             .collect::<Vec<_>>();
         Scheme { poly, tipo }
     }
 
-    fn normalize(&self) -> Solve<Type> {
+    pub fn normalize(&self) -> Solve<Type> {
         match self {
             Type::Lit(_) | Type::Con(_) => Ok(self.clone()),
             Type::Var(a) => {
-                let ords = Self::order(self);
-                let lookup = ords.into_iter().find(|(u, v)| a == u);
+                let ords = Self::enumerate(self);
+                let lookup = ords.into_iter().find(|(u, _)| a == u);
                 if let Some((_u, v)) = lookup {
                     Ok(Type::Var(v))
                 } else {
@@ -69,16 +121,16 @@ impl Type {
         }
     }
 
-    fn order(&self) -> Vec<(Var, Var)> {
+    pub fn enumerate(&self) -> Vec<(Ty, Ty)> {
         let mut vars = Self::fv(self);
         vars.dedup();
         vars.iter()
             .zip(0u32..)
-            .map(|(v, i)| (*v, Var(i)))
+            .map(|(v, i)| (*v, Ty(i)))
             .collect::<Vec<_>>()
     }
 
-    fn fv(&self) -> Vec<Var> {
+    pub fn fv(&self) -> Vec<Ty> {
         match self {
             Type::Var(a) => vec![*a],
             Type::Lit(_) | Type::Con(_) => vec![],
@@ -96,11 +148,13 @@ impl Type {
 impl From<Lit> for Type {
     fn from(lit: Lit) -> Self {
         match lit {
-            Lit::Unit => Type::UNIT,
-            Lit::Bool => Type::BOOL,
-            Lit::Int => Type::INT,
-            Lit::Char => Type::CHAR,
-            Lit::Str => Type::STR,
+            Lit::Unit => UNIT,
+            Lit::Bool => BOOL,
+            Lit::Int => INT,
+            Lit::Char => CHAR,
+            Lit::Str => STR,
+            Lit::Float => FLOAT,
+            Lit::Double => DOUBLE,
         }
     }
 }
@@ -108,11 +162,13 @@ impl From<Lit> for Type {
 impl From<Literal> for Type {
     fn from(lit: Literal) -> Self {
         match lit {
-            Literal::Unit => Type::UNIT,
-            Literal::Bool(b) => Type::BOOL,
-            Literal::Int(i) => Type::INT,
-            Literal::Char(c) => Type::CHAR,
-            Literal::Str(s) => Type::STR,
+            Literal::Unit => UNIT,
+            Literal::Bool(_) => BOOL,
+            Literal::Int(_) => INT,
+            Literal::Char(_) => CHAR,
+            Literal::Str(_) => STR,
+            Literal::Float(_) => FLOAT,
+            Literal::Double(_) => DOUBLE,
         }
     }
 }
@@ -143,7 +199,7 @@ impl std::fmt::Display for Type {
 }
 
 impl Substitutable for Type {
-    fn ftv(&self) -> HashSet<Var> {
+    fn ftv(&self) -> HashSet<Ty> {
         match self {
             Type::Lit(_) | Type::Con(_) => [].into(),
             Type::Var(n) => [*n].into(),
@@ -183,16 +239,20 @@ impl Substitutable for Type {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Scheme {
     /// Polymorphic type variables
-    pub poly: Vec<Var>,
+    pub poly: Vec<Ty>,
     pub tipo: Type,
 }
 
 impl Scheme {
+    pub fn monotype(tipo: Type) -> Scheme {
+        Scheme { poly: vec![], tipo }
+    }
+
     pub fn normalize(&self) -> Solve<Scheme> {
         let poly = self
             .tipo
             .clone()
-            .order()
+            .enumerate()
             .into_iter()
             .map(|(_, snd)| snd)
             .collect::<Vec<_>>();
@@ -202,7 +262,7 @@ impl Scheme {
 }
 
 impl Substitutable for Scheme {
-    fn ftv(&self) -> HashSet<Var> {
+    fn ftv(&self) -> HashSet<Ty> {
         let vs = self.poly.iter().cloned().collect();
         self.tipo.ftv().difference(&vs).cloned().collect()
     }
@@ -224,33 +284,19 @@ impl Substitutable for Scheme {
 
 impl std::fmt::Display for Scheme {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "forall ")?;
-        for v in self.poly.iter() {
-            write!(f, "{} ", v.display())?;
+        if self.poly.is_empty() {
+            write!(f, "{}", &self.tipo)
+        } else {
+            write!(f, "forall ")?;
+            write!(f, "{}", Many(&self.poly[..], ' '))?;
+            write!(f, ". {}", self.tipo)
         }
-        write!(f, ". {}", self.tipo)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Many<'a, A>(pub &'a [A]);
-
-impl<'a, A> std::fmt::Display for Many<'a, A>
-where
-    A: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_char('\n')?;
-        for a in self.0 {
-            write!(f, "\t")?;
-            A::fmt(a, f)?;
-        }
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
+    #![allow(unused)]
     use super::*;
 
     fn func(t1: Type, t2: Type) -> Type {
