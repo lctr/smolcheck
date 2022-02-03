@@ -1,44 +1,11 @@
 use crate::{
     failure::Solve,
     infer::Infer,
-<<<<<<< HEAD
     literal::{Lit, Literal},
-    name::Name,
-    subst::{Subst, Substitutable},
-    types::{Scheme, Type},
-    unify::Unifier,
-};
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Expression<T> {
-    Ident(T),
-    Lit(Literal),
-    List(Vec<Expression<T>>),
-    Tuple(Vec<Expression<T>>),
-    Lam(T, Box<Expression<T>>),
-    App(Box<Expression<T>>, Box<Expression<T>>),
-    Let(T, Box<Expression<T>>, Box<Expression<T>>),
-    Bin(PrimOp, Box<Expression<T>>, Box<Expression<T>>),
-    Cond(Box<Expression<T>>, Box<Expression<T>>, Box<Expression<T>>),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Declaration<T>(pub T, pub Expression<T>);
-
-pub type Expr = Expression<Name>;
-pub type Decl = Declaration<Name>;
-=======
-    literal::Literal,
     name::{Name, SymId},
-    types::{Type, BOOL},
-    Hashy, Lit,
+    types::{constants::*, Type},
+    Hashy,
 };
-
-// pub enum Kind<T> {
-//     Hash(T),
-//     Star(T),
-//     Arrow(Box<Kind<T>>, Box<Kind<T>>),
-// }
 
 /// An expression is a generic enum that represents the nodes of an abstract
 /// syntax tree. In this implementation, expressions may be parametrized by
@@ -104,7 +71,6 @@ pub struct Declaration<L, T, O>(pub T, pub Expression<L, T, O>);
 
 pub type Expr = Expression<Literal, Name, PrimOp>;
 pub type Decl = Declaration<Literal, Name, PrimOp>;
->>>>>>> e6d1a60 (added div/rem to primops; generalized Expression to depend on literal, name, and op type parameters; began polymorphic operator rules)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PrimOp {
@@ -119,22 +85,18 @@ pub enum PrimOp {
     Greater,
     LessEq,
     GreaterEq,
+    Or,
+    And,
+}
+
+pub trait Signature {
+    type Repr: Hashy;
+    type Context;
+
+    fn signature(self, context: &mut Self::Context) -> Self::Repr;
 }
 
 impl PrimOp {
-    /// Primitive op return types. Simplified for the time being.
-    pub fn ret_ty(self) -> Type {
-        match self {
-            PrimOp::Add | PrimOp::Sub | PrimOp::Mul => Type::INT,
-            PrimOp::NotEq
-            | PrimOp::Eq
-            | PrimOp::Less
-            | PrimOp::Greater
-            | PrimOp::LessEq
-            | PrimOp::GreaterEq => Type::BOOL,
-        }
-    }
-
     pub fn signature(self, engine: &mut Infer) -> Type {
         use PrimOp as P;
         match self {
@@ -151,13 +113,11 @@ impl PrimOp {
                 let b = engine.fresh();
                 Type::Lam(a.boxed(), Type::Lam(b.boxed(), Type::BOOL.boxed()).boxed())
             }
-<<<<<<< HEAD
-=======
+
             P::Or | P::And => Type::Lam(
                 Type::BOOL.boxed(),
                 Type::Lam(Type::BOOL.boxed(), Type::BOOL.boxed()).boxed(),
             ),
->>>>>>> e6d1a60 (added div/rem to primops; generalized Expression to depend on literal, name, and op type parameters; began polymorphic operator rules)
         }
     }
 
@@ -212,6 +172,8 @@ impl PrimOp {
             PrimOp::Greater => ">",
             PrimOp::LessEq => "<=",
             PrimOp::GreaterEq => ">=",
+            PrimOp::Or => "||",
+            PrimOp::And => "&&",
         }
     }
 }
