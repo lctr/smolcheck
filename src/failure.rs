@@ -19,6 +19,11 @@ impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Unification failure: ")?;
         match self {
+            Failure::NotUnified(Type::Lit(x), Type::Lit(y)) => write!(
+                f,
+                "distinct primitives! Unable to unify the primitive `{}` with `{}`",
+                x, y
+            ),
             Failure::NotUnified(t1, t2) => write!(
                 f,
                 "not unified! Unable to unify the type\n\t`{}`\nwith the type\n\t`{}`",
