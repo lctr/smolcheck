@@ -1,7 +1,7 @@
 use crate::{
     constraint::Constraint,
     failure::{Failure, Solve},
-    name::Var,
+    name::Ty,
     subst::{occurs_check, Subst, Substitutable},
     types::Type,
 };
@@ -26,18 +26,6 @@ impl Unifier {
 
     pub fn solve(sub: Subst, constraints: &[Constraint]) -> Solve<Subst> {
         Unifier::new(sub, constraints.to_vec()).solver()
-
-        // let cs = constraints;
-        // match cs.split_first() {
-        //     Some((head, rest)) => {
-        //         let Constraint(t1, t2) = head.clone();
-        //         let s1 = Self::unifies(t1, t2)?;
-        //         let s2 = s1.compose(&sub);
-        //         let tail = rest.to_vec().apply(&s1);
-        //         Self::solve(s2, tail.as_slice())
-        //     }
-        //     None => Ok(sub),
-        // }
     }
 
     fn solver(self) -> Solve<Subst> {
@@ -81,13 +69,27 @@ impl Unifier {
             Ok(Subst::empty())
         } else {
             match (t1, t2) {
+                (Type::Lit(x), Type::Lit(y)) => {
+                    if x == y {
+                        Ok(Subst::empty())
+                    } else {
+                        Err(Failure::NotUnified(Type::Lit(x), Type::Lit(y)))
+                    }
+                }
+                // (Type::List(x), Type::Var(t)) | (Type::Var(t), Type::List(x)) => {
+                //     if occurs_check(x.as_ref(), t) {
+                //         Err(Failure::Infinite(Type::Var(t), *x))
+                //     } else {
+                //         Self::bind(t, *x)
+                //     }
+                // }
+                (Type::List(x), Type::List(y)) => Self::unifies(*x, *y),
                 (Type::Con(x), Type::Con(y)) if x == y => Ok(Subst::empty()),
                 (Type::Var(v), t) => Self::bind(v, t),
                 (t, Type::Var(v)) => Self::bind(v, t),
                 (Type::Lam(x1, y1), Type::Lam(x2, y2)) => {
                     Self::unify_many(&[*x1, *y1], &[*x2, *y2])
                 }
-                (Type::List(x), Type::List(y)) => Self::unifies(*x, *y),
                 (Type::Tuple(xs), Type::Tuple(ys)) => Self::zip_unify(xs, ys),
                 (x, y) => Err(Failure::Infinite(x, y)),
             }
@@ -123,7 +125,7 @@ impl Unifier {
         }
     }
 
-    pub fn bind(var: Var, ty: Type) -> Solve<Subst> {
+    pub fn bind(var: Ty, ty: Type) -> Solve<Subst> {
         match ty {
             Type::Var(v) if v == var => Ok(Subst::empty()),
             t if occurs_check(&t, var) => Err(Failure::Infinite(t, Type::Var(var))),
